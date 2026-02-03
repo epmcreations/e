@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>bro-shell phone controller</title>
+    <style>
+        body { background: #050505; color: #00e5ff; font-family: 'Consolas', monospace; padding: 20px; }
+        #terminal { background: #000; border: 1px solid #00e5ff; height: 400px; overflow-y: auto; padding: 15px; margin-bottom: 10px; border-radius: 8px; box-shadow: 0 0 15px rgba(0,229,255,0.2); }
+        .input-area { display: flex; gap: 10px; }
+        input { flex: 1; background: #111; border: 1px solid #00e5ff; color: #fff; padding: 12px; outline: none; border-radius: 4px; }
+        button { background: #00e5ff; color: #000; border: none; padding: 10px 25px; cursor: pointer; font-weight: bold; border-radius: 4px; }
+        button:disabled { background: #333; color: #888; }
+        .hint { color: #888; font-size: 0.8rem; margin-top: 10px; }
+    </style>
+</head>
+<body>
+
+    <h2>📱 bro-shell android controller</h2>
+    <div id="terminal">-- system: waiting for device connection --<br>-- make sure usb debugging is on --</div>
+
+    <div class="input-area">
+        <button id="connectBtn">connect phone</button>
+        <input type="text" id="cmdInput" placeholder="try: shell getprop ro.product.model" disabled>
+        <button id="sendBtn" disabled>run</button>
+    </div>
+
+    <p class="hint">commands to try: <b>shell screencap -p /sdcard/s.png</b> | <b>reboot</b> | <b>shell input keyevent 26</b> (power button)</p>
+
+    <script src="https://cdn.jsdelivr.net/npm/webadb@0.0.12/dist/webadb.js"></script>
+    
+    <script>
+        const connectBtn = document.getElementById('connectBtn');
+        const sendBtn = document.getElementById('sendBtn');
+        const cmdInput = document.getElementById('cmdInput');
+        const terminal = document.getElementById('terminal');
+
+        let adb;
+        let shell;
+
+        function log(msg) {
+            terminal.innerHTML += `<div><span style="color:#888">></span> ${msg}</div>`;
+            terminal.scrollTop = terminal.scrollHeight;
+        }
+
+        connectBtn.onclick = async () => {
+            try {
+                log("requesting usb access...");
+                const webusb = await Adb.WebUsb.setup();
+                adb = await webusb.connectDevice();
+                
+                log("connected! check your phone for a 'allow usb debugging' popup and hit ALWAYS ALLOW.");
+                
+                // enable inputs
+                cmdInput.disabled = false;
+                sendBtn.disabled = false;
+                connectBtn.innerText = "connected";
+                connectBtn.style.background = "#00ff00";
+
+            } catch (e) {
+                log(`<span style="color:red">error: ${e.message}</span>`);
+            }
+        };
+
+        sendBtn.onclick = async () => {
+            const cmd = cmdInput.value;
+            if (!adb || !cmd) return;
+
+            try {
+                log(`running: ${cmd}`);
+                // execute the command
+                let shell = await adb.shell(cmd);
+                let response = await shell.receive();
+                
+                // decode the binary response to text
+                let text = new TextDecoder().decode(response.data);
+                log(`<span style="color:#00ff00">${text || "(done - no output)"}</span>`);
+                
+                cmdInput.value = "";
+            } catch (e) {
+                log(`<span style="color:red">execution error: ${e.message}</span>`);
+            }
+        };
+
+        cmdInput.onkeypress = (e) => { if(e.key === 'Enter') sendBtn.click(); };
+    </script>
+</body>
+</html>
