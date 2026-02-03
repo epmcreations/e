@@ -2,31 +2,41 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>bro-shell phone controller</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>bro-shell  controller</title>
     <style>
-        body { background: #050505; color: #00e5ff; font-family: 'Consolas', monospace; padding: 20px; }
-        #terminal { background: #000; border: 1px solid #00e5ff; height: 400px; overflow-y: auto; padding: 15px; margin-bottom: 10px; border-radius: 8px; box-shadow: 0 0 15px rgba(0,229,255,0.2); }
+        body { background: #050505; color: #00e5ff; font-family: 'Consolas', monospace; padding: 20px; margin: 0; display: flex; flex-direction: column; height: 100vh; box-sizing: border-box; }
+        h2 { margin-top: 0; text-shadow: 0 0 10px #00e5ff; }
+        #terminal { background: #000; border: 1px solid #00e5ff; flex-grow: 1; overflow-y: auto; padding: 15px; margin-bottom: 10px; border-radius: 8px; box-shadow: 0 0 15px rgba(0,229,255,0.1); font-size: 14px; line-height: 1.4; }
         .input-area { display: flex; gap: 10px; }
-        input { flex: 1; background: #111; border: 1px solid #00e5ff; color: #fff; padding: 12px; outline: none; border-radius: 4px; }
-        button { background: #00e5ff; color: #000; border: none; padding: 10px 25px; cursor: pointer; font-weight: bold; border-radius: 4px; }
-        button:disabled { background: #333; color: #888; }
-        .hint { color: #888; font-size: 0.8rem; margin-top: 10px; }
+        input { flex: 1; background: #111; border: 1px solid #00e5ff; color: #fff; padding: 12px; outline: none; border-radius: 4px; font-family: inherit; }
+        button { background: #00e5ff; color: #000; border: none; padding: 10px 25px; cursor: pointer; font-weight: bold; border-radius: 4px; transition: 0.2s; }
+        button:hover { background: #fff; }
+        button:disabled { background: #333; color: #888; cursor: not-allowed; }
+        .hint { color: #555; font-size: 0.75rem; margin-top: 10px; }
+        .error { color: #ff4444; }
+        .success { color: #00ff00; }
     </style>
 </head>
 <body>
 
-    <h2>📱 bro-shell android controller</h2>
-    <div id="terminal">-- system: waiting for device connection --<br>-- make sure usb debugging is on --</div>
+    <h2>📱 bro-shell android v1.0</h2>
+    <div id="terminal">-- system: initialization...<br>-- waiting for user to click connect --</div>
 
     <div class="input-area">
         <button id="connectBtn">connect phone</button>
-        <input type="text" id="cmdInput" placeholder="try: shell getprop ro.product.model" disabled>
+        <input type="text" id="cmdInput" placeholder="e.g., shell getprop ro.product.model" disabled>
         <button id="sendBtn" disabled>run</button>
     </div>
 
-    <p class="hint">commands to try: <b>shell screencap -p /sdcard/s.png</b> | <b>reboot</b> | <b>shell input keyevent 26</b> (power button)</p>
+    <div class="hint">
+        <b>quick commands:</b> 
+        <code style="color:#aaa">shell input keyevent 26</code> (power button) | 
+        <code style="color:#aaa">shell screencap -p /sdcard/s.png</code> | 
+        <code style="color:#aaa">reboot</code>
+    </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/webadb@0.0.12/dist/webadb.js"></script>
+    <script src="https://unpkg.com/webadb@0.0.12/dist/webadb.js"></script>
     
     <script>
         const connectBtn = document.getElementById('connectBtn');
@@ -35,53 +45,73 @@
         const terminal = document.getElementById('terminal');
 
         let adb;
-        let shell;
 
-        function log(msg) {
-            terminal.innerHTML += `<div><span style="color:#888">></span> ${msg}</div>`;
+        function log(msg, isError = false) {
+            const spanClass = isError ? 'error' : '';
+            terminal.innerHTML += `<div><span style="color:#444">></span> <span class="${spanClass}">${msg}</span></div>`;
             terminal.scrollTop = terminal.scrollHeight;
         }
 
+        // check if library loaded on startup
+        window.addEventListener('load', () => {
+            if (typeof Adb !== 'undefined') {
+                log("adb library loaded. enable usb debugging on your phone then click connect.");
+            } else {
+                log("error: adb library failed to load. are you offline?", true);
+            }
+        });
+
         connectBtn.onclick = async () => {
             try {
-                log("requesting usb access...");
+                log("requesting usb device...");
+                
+                // 1. find device
                 const webusb = await Adb.WebUsb.setup();
                 adb = await webusb.connectDevice();
                 
-                log("connected! check your phone for a 'allow usb debugging' popup and hit ALWAYS ALLOW.");
+                // 2. perform handshake
+                log("connecting to adb daemon...");
+                await adb.connect();
                 
-                // enable inputs
+                log("handshake successful!", false);
+                log("<span class='success'>connected! check phone for 'allow debugging' popup.</span>");
+                
+                // update ui
                 cmdInput.disabled = false;
                 sendBtn.disabled = false;
                 connectBtn.innerText = "connected";
                 connectBtn.style.background = "#00ff00";
 
             } catch (e) {
-                log(`<span style="color:red">error: ${e.message}</span>`);
+                log("connection failed: " + e.message, true);
+                console.error(e);
             }
         };
 
-        sendBtn.onclick = async () => {
-            const cmd = cmdInput.value;
+        async function runCommand() {
+            const cmd = cmdInput.value.trim();
             if (!adb || !cmd) return;
 
             try {
-                log(`running: ${cmd}`);
-                // execute the command
-                let shell = await adb.shell(cmd);
-                let response = await shell.receive();
+                log(`executing: ${cmd}`);
                 
-                // decode the binary response to text
-                let text = new TextDecoder().decode(response.data);
-                log(`<span style="color:#00ff00">${text || "(done - no output)"}</span>`);
+                // adb shell commands create a stream
+                const shell = await adb.shell(cmd);
+                const response = await shell.receive();
                 
+                // convert binary to text
+                const decoder = new TextDecoder();
+                const output = decoder.decode(response.data);
+                
+                log(output || "(command sent, no output returned)");
                 cmdInput.value = "";
             } catch (e) {
-                log(`<span style="color:red">execution error: ${e.message}</span>`);
+                log("execution error: " + e.message, true);
             }
-        };
+        }
 
-        cmdInput.onkeypress = (e) => { if(e.key === 'Enter') sendBtn.click(); };
+        sendBtn.onclick = runCommand;
+        cmdInput.onkeypress = (e) => { if(e.key === 'Enter') runCommand(); };
     </script>
 </body>
 </html>
